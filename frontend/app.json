@@ -1,0 +1,28 @@
+{
+    "expo": {
+        "name": "CricAI",
+        "slug": "cricai",
+        "version": "1.0.0",
+        "orientation": "portrait",
+        "scheme": "cricai",
+        "userInterfaceStyle": "dark",
+        "ios": {
+            "supportsTablet": false,
+            "bundleIdentifier": "com.cricai.app"
+        },
+        "android": {
+            "package": "com.cricai.app"
+        },
+        "web": {
+            "bundler": "metro",
+            "output": "static"
+        },
+        "plugins": [
+            "expo-router",
+            "expo-font"
+        ],
+        "experiments": {
+            "typedRoutes": false
+        }
+    }
+}
