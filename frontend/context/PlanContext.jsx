@@ -1,42 +1,75 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../utils/supabase';
+import { useAuth } from './AuthContext';
 
 const PlanContext = createContext(null);
 
-const STORAGE_KEYS = {
-    USER_PROFILE: '@cricai_user_profile',
-    TRAINING_PLAN: '@cricai_training_plan',
-    PROGRESS: '@cricai_progress',
-    STREAK: '@cricai_streak',
-};
-
 export function PlanProvider({ children }) {
-    const [userProfile, setUserProfile] = useState(null);
+    const { user } = useAuth();
+    const [userProfile, setUserProfile]   = useState(null);
     const [trainingPlan, setTrainingPlan] = useState(null);
-    const [progress, setProgress] = useState({}); // { dayNumber: { completed, completedAt } }
-    const [streak, setStreak] = useState(0);
-    const [isLoading, setIsLoading] = useState(true);
+    const [progress, setProgress]         = useState({});
+    const [streak, setStreak]             = useState(0);
+    const [isLoading, setIsLoading]       = useState(true);
 
-    // Load persisted data on mount
     useEffect(() => {
-        loadStoredData();
-    }, []);
+        if (user) {
+            loadData();
+        } else {
+            setUserProfile(null);
+            setTrainingPlan(null);
+            setProgress({});
+            setStreak(0);
+            setIsLoading(false);
+        }
+    }, [user]);
 
-    const loadStoredData = async () => {
+    const loadData = async () => {
+        setIsLoading(true);
         try {
-            const [profileStr, planStr, progressStr, streakStr] = await Promise.all([
-                AsyncStorage.getItem(STORAGE_KEYS.USER_PROFILE),
-                AsyncStorage.getItem(STORAGE_KEYS.TRAINING_PLAN),
-                AsyncStorage.getItem(STORAGE_KEYS.PROGRESS),
-                AsyncStorage.getItem(STORAGE_KEYS.STREAK),
-            ]);
+            const userId = user.id;
 
-            if (profileStr) setUserProfile(JSON.parse(profileStr));
-            if (planStr) setTrainingPlan(JSON.parse(planStr));
-            if (progressStr) setProgress(JSON.parse(progressStr));
-            if (streakStr) setStreak(parseInt(streakStr, 10));
+            // 1. Try to load from Local Storage first (super fast & reliable)
+            const localProfile  = await AsyncStorage.getItem(`@profile_${userId}`);
+            const localPlan     = await AsyncStorage.getItem(`@plan_${userId}`);
+            const localProgress = await AsyncStorage.getItem(`@progress_${userId}`);
+            
+            if (localProfile) setUserProfile(JSON.parse(localProfile));
+            if (localPlan) setTrainingPlan(JSON.parse(localPlan));
+            if (localProgress) {
+                const prog = JSON.parse(localProgress);
+                setProgress(prog);
+                setStreak(calculateStreak(prog));
+            }
+
+            // 2. Silently try to sync from Supabase in the background (ignore if tables don't exist)
+            Promise.allSettled([
+                supabase.from('user_profiles').select('*').eq('user_id', userId).maybeSingle(),
+                supabase.from('training_plans').select('*').eq('user_id', userId).maybeSingle(),
+                supabase.from('progress').select('*').eq('user_id', userId),
+            ]).then(([profileResult, planResult, progressResult]) => {
+                if (profileResult.status === 'fulfilled' && profileResult.value.data && !localProfile) {
+                    const p = profileResult.value.data;
+                    setUserProfile({
+                        name: p.name, age: p.age, ageMonths: p.age_months,
+                        role: p.role, level: p.level,
+                        availability: p.availability, fitness: p.fitness,
+                        selectedCoach: p.selected_coach || 'virat',
+                    });
+                }
+                if (planResult.status === 'fulfilled' && planResult.value.data && !localPlan) {
+                    const row = planResult.value.data;
+                    setTrainingPlan({
+                        plan:          row.plan,
+                        playerSummary: row.player_summary ?? null,
+                    });
+                }
+            });
+
         } catch (e) {
-            console.error('Error loading stored data:', e);
+            console.warn('[PlanContext] loadData error:', e.message);
         } finally {
             setIsLoading(false);
         }
@@ -44,18 +77,52 @@ export function PlanProvider({ children }) {
 
     const saveUserProfile = async (profile) => {
         setUserProfile(profile);
-        await AsyncStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(profile));
+        if (user) await AsyncStorage.setItem(`@profile_${user.id}`, JSON.stringify(profile));
+        
+        // Silently try Supabase (won't crash if table missing)
+        supabase.from('user_profiles').upsert({
+            user_id:       user.id,
+            name:          profile.name,
+            age:           profile.age,
+            age_months:    profile.ageMonths ?? 0,
+            role:          profile.role,
+            level:         profile.level,
+            availability:  profile.availability,
+            fitness:       profile.fitness,
+            selected_coach: profile.selectedCoach || 'virat',
+            updated_at:    new Date().toISOString(),
+        }, { onConflict: 'user_id' }).then(({error}) => {
+            if (error) console.warn('Supabase profile sync failed:', error.message);
+        });
+
+        return true;
     };
 
-    const saveTrainingPlan = async (plan) => {
-        setTrainingPlan(plan);
+    const saveTrainingPlan = async (planData) => {
+        const planArray     = planData.plan ?? planData;
+        const playerSummary = planData.playerSummary ?? null;
+        const finalPlan = { plan: planArray, playerSummary };
+
+        setTrainingPlan(finalPlan);
         setProgress({});
         setStreak(0);
-        await Promise.all([
-            AsyncStorage.setItem(STORAGE_KEYS.TRAINING_PLAN, JSON.stringify(plan)),
-            AsyncStorage.removeItem(STORAGE_KEYS.PROGRESS),
-            AsyncStorage.setItem(STORAGE_KEYS.STREAK, '0'),
-        ]);
+
+        if (user) {
+            await AsyncStorage.setItem(`@plan_${user.id}`, JSON.stringify(finalPlan));
+            await AsyncStorage.setItem(`@progress_${user.id}`, JSON.stringify({}));
+        }
+
+        // Silently try Supabase
+        supabase.from('training_plans').upsert({
+            user_id:        user.id,
+            plan:           planArray,
+            player_summary: playerSummary,
+            generated_at:   new Date().toISOString(),
+        }, { onConflict: 'user_id' }).then(({error}) => {
+            if (error) console.warn('Supabase plan sync failed:', error.message);
+        });
+        
+        supabase.from('progress').delete().eq('user_id', user.id).then();
     };
 
     const markDayComplete = async (dayNumber) => {
@@ -65,28 +132,40 @@ export function PlanProvider({ children }) {
             [dayNumber]: { completed: true, completedAt: today },
         };
         setProgress(newProgress);
+        setStreak(calculateStreak(newProgress));
 
-        // Calculate streak
-        const newStreak = calculateStreak(newProgress);
-        setStreak(newStreak);
+        if (user) {
+            await AsyncStorage.setItem(`@progress_${user.id}`, JSON.stringify(newProgress));
+        }
 
-        await Promise.all([
-            AsyncStorage.setItem(STORAGE_KEYS.PROGRESS, JSON.stringify(newProgress)),
-            AsyncStorage.setItem(STORAGE_KEYS.STREAK, String(newStreak)),
-        ]);
+        // Silently try Supabase
+        supabase.from('progress').upsert({
+            user_id:      user.id,
+            day_number:   dayNumber,
+            completed:    true,
+            completed_at: today,
+        }, { onConflict: 'user_id,day_number' }).then(({error}) => {
+            if (error) console.warn('Supabase progress sync failed:', error.message);
+        });
+    };
+
+    const saveSelectedCoach = async (coachKey) => {
+        setUserProfile(prev => prev ? { ...prev, selectedCoach: coachKey } : prev);
+        if (!user) return;
+        await supabase.from('user_profiles').upsert({
+            user_id:        user.id,
+            selected_coach: coachKey,
+            updated_at:     new Date().toISOString(),
+        }, { onConflict: 'user_id' });
     };
 
     const calculateStreak = (progressData) => {
-        const today = new Date();
-        let streak = 0;
+        let s = 0;
         for (let i = 1; i <= 100; i++) {
-            if (progressData[i]?.completed) {
-                streak++;
-            } else {
-                break;
-            }
+            if (progressData[i]?.completed) s++;
+            else break;
         }
-        return streak;
+        return s;
     };
 
     const resetAll = async () => {
@@ -94,21 +173,32 @@ export function PlanProvider({ children }) {
         setTrainingPlan(null);
         setProgress({});
         setStreak(0);
-        await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
+        if (!user) return;
+        
+        await AsyncStorage.removeItem(`@profile_${user.id}`);
+        await AsyncStorage.removeItem(`@plan_${user.id}`);
+        await AsyncStorage.removeItem(`@progress_${user.id}`);
+
+        Promise.allSettled([
+            supabase.from('user_profiles').delete().eq('user_id', user.id),
+            supabase.from('training_plans').delete().eq('user_id', user.id),
+            supabase.from('progress').delete().eq('user_id', user.id),
+        ]).then();
     };
 
-    // Computed values
-    const completedDays = Object.values(progress).filter(p => p.completed).length;
+    // ── Computed values ───────────────────────────────────────────────────────
+    const completedDays     = Object.values(progress).filter(p => p.completed).length;
     const completionPercent = trainingPlan ? Math.round((completedDays / 100) * 100) : 0;
-    const currentDay = completedDays + 1;
-    const todayTask = trainingPlan?.plan?.find(d => d.dayNumber === currentDay);
-    const currentPhase = todayTask?.phase || 1;
+    const currentDay        = completedDays + 1;
+    const planArray         = trainingPlan?.plan ?? [];
+    const todayTask         = planArray.find(d => d.dayNumber === currentDay);
+    const currentPhase      = todayTask?.phase || 1;
 
     const getWeeklyProgress = () => {
         const weeks = [];
         for (let week = 1; week <= 14; week++) {
             const startDay = (week - 1) * 7 + 1;
-            const endDay = Math.min(week * 7, 100);
+            const endDay   = Math.min(week * 7, 100);
             let count = 0;
             for (let d = startDay; d <= endDay; d++) {
                 if (progress[d]?.completed) count++;
@@ -120,21 +210,10 @@ export function PlanProvider({ children }) {
 
     return (
         <PlanContext.Provider value={{
-            userProfile,
-            trainingPlan,
-            progress,
-            streak,
-            isLoading,
-            completedDays,
-            completionPercent,
-            currentDay,
-            todayTask,
-            currentPhase,
-            saveUserProfile,
-            saveTrainingPlan,
-            markDayComplete,
-            resetAll,
-            getWeeklyProgress,
+            userProfile, trainingPlan, progress, streak, isLoading,
+            completedDays, completionPercent, currentDay, todayTask, currentPhase,
+            saveUserProfile, saveTrainingPlan, markDayComplete, resetAll,
+            getWeeklyProgress, loadData, saveSelectedCoach,
         }}>
             {children}
         </PlanContext.Provider>

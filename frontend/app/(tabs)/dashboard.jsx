@@ -9,31 +9,63 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, PHASES } from '../../constants/theme';
 import { usePlan } from '../../context/PlanContext';
+import LoadingSkeleton from '../../components/LoadingSkeleton';
+import EmptyState from '../../components/EmptyState';
 
 const { width } = Dimensions.get('window');
 
 export default function DashboardScreen() {
     const router = useRouter();
     const {
-        userProfile, trainingPlan, progress, streak,
+        userProfile, trainingPlan, progress, streak, isLoading,
         completedDays, completionPercent, currentDay, todayTask, currentPhase
     } = usePlan();
+
+    const aiInsight = trainingPlan?.playerSummary?.aiInsight;
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(30)).current;
 
     useEffect(() => {
+        if (!trainingPlan) return;
         Animated.parallel([
             Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
             Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
         ]).start();
-    }, []);
+    }, [trainingPlan]);
 
-    if (!trainingPlan) return null;
+    // Loading state
+    if (isLoading) {
+        return (
+            <LinearGradient colors={['#050810', '#0A0E1A']} style={{ flex: 1 }}>
+                <SafeAreaView style={{ flex: 1 }}>
+                    <LoadingSkeleton />
+                </SafeAreaView>
+            </LinearGradient>
+        );
+    }
+
+    // No plan — show CTA
+    if (!trainingPlan) {
+        return (
+            <LinearGradient colors={['#050810', '#0A0E1A']} style={{ flex: 1 }}>
+                <SafeAreaView style={{ flex: 1 }}>
+                    <EmptyState
+                        emoji="🏏"
+                        title="No Training Plan Yet"
+                        subtitle="Generate your personalised 100-day AI cricket plan to get started."
+                        actionLabel="Generate My Plan"
+                        onAction={() => router.replace('/onboard')}
+                    />
+                </SafeAreaView>
+            </LinearGradient>
+        );
+    }
 
     const phaseInfo = PHASES.find(p => p.phase === currentPhase) || PHASES[0];
-    const phaseProgress = trainingPlan.plan.filter(d => d.phase === currentPhase && progress[d.dayNumber]?.completed).length;
-    const phaseTotalDays = trainingPlan.plan.filter(d => d.phase === currentPhase).length;
+    const planArray = trainingPlan?.plan ?? [];
+    const phaseProgress = planArray.filter(d => d.phase === currentPhase && progress[d.dayNumber]?.completed).length;
+    const phaseTotalDays = planArray.filter(d => d.phase === currentPhase).length;
 
     return (
         <LinearGradient colors={['#050810', '#0A0E1A']} style={styles.container}>
@@ -103,6 +135,28 @@ export default function DashboardScreen() {
                         <StatCard icon="time-outline" value={100 - completedDays} label="Left" color="#3B82F6" />
                     </Animated.View>
 
+                    {/* AI Coach Insight */}
+                    {!!aiInsight && (
+                        <Animated.View style={{ opacity: fadeAnim }}>
+                            <View style={styles.coachCard}>
+                                <View style={styles.coachHeader}>
+                                    <View style={styles.coachBadge}>
+                                        <Text style={styles.coachBadgeText}>🤖 AI COACH</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.askCoachBtn}
+                                        onPress={() => router.push('/(tabs)/coach')}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Ionicons name="chatbubble-ellipses-outline" size={13} color={COLORS.green} />
+                                        <Text style={styles.askCoachText}>Ask Coach</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <Text style={styles.coachInsight}>{aiInsight}</Text>
+                            </View>
+                        </Animated.View>
+                    )}
+
                     {/* Today's task */}
                     {todayTask && currentDay <= 100 && (
                         <Animated.View style={{ opacity: fadeAnim }}>
@@ -140,12 +194,25 @@ export default function DashboardScreen() {
                         </Animated.View>
                     )}
 
-                    {currentDay > 100 && (
-                        <View style={styles.completedBanner}>
-                            <Text style={styles.completedEmoji}>🏆</Text>
-                            <Text style={styles.completedText}>You completed the 100-day program!</Text>
+                    )
+
+                    {/* Match Simulator CTA */}
+                    <TouchableOpacity
+                        style={[styles.matchSimCard, completedDays < 20 && styles.matchSimLocked]}
+                        onPress={() => completedDays >= 20 && router.push('/match-sim')}
+                        activeOpacity={completedDays >= 20 ? 0.85 : 1}
+                    >
+                        <Text style={styles.matchSimEmoji}>{completedDays >= 20 ? '🏟️' : '🔒'}</Text>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.matchSimTitle}>Match Simulator</Text>
+                            <Text style={styles.matchSimSub}>
+                                {completedDays >= 20
+                                    ? 'Test your cricket IQ with AI match scenarios'
+                                    : `Unlocks at Day 20 — ${20 - completedDays} days to go`}
+                            </Text>
                         </View>
-                    )}
+                        {completedDays >= 20 && <Ionicons name="chevron-forward" size={20} color={COLORS.green} />}
+                    </TouchableOpacity>
 
                 </ScrollView>
             </SafeAreaView>
@@ -227,4 +294,23 @@ const styles = StyleSheet.create({
     },
     completedEmoji: { fontSize: 48, marginBottom: 8 },
     completedText: { fontFamily: 'Outfit_700Bold', fontSize: 18, color: COLORS.green, textAlign: 'center' },
+    coachCard: {
+        backgroundColor: '#111827', borderWidth: 1, borderColor: '#1E2D45',
+        borderRadius: 16, padding: 16, marginBottom: 16,
+    },
+    coachHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    coachBadge: { backgroundColor: '#3B82F620', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+    coachBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 10, color: '#60A5FA', letterSpacing: 1 },
+    askCoachBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#00C85120', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+    askCoachText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: COLORS.green },
+    coachInsight: { fontFamily: 'Inter_400Regular', fontSize: 14, color: '#CBD5E1', lineHeight: 22, fontStyle: 'italic' },
+    matchSimCard: {
+        flexDirection: 'row', alignItems: 'center', gap: 14,
+        backgroundColor: '#111827', borderWidth: 1.5, borderColor: '#00C85140',
+        borderRadius: 18, padding: 16, marginBottom: 16,
+    },
+    matchSimLocked: { borderColor: '#1E2D45', opacity: 0.6 },
+    matchSimEmoji: { fontSize: 32 },
+    matchSimTitle: { fontFamily: 'Outfit_700Bold', fontSize: 16, color: COLORS.textPrimary },
+    matchSimSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
 });

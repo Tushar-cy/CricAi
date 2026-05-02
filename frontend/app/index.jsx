@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { usePlan } from '../context/PlanContext';
+import { useAuth } from '../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,6 +23,7 @@ const FEATURES = [
 export default function LandingScreen() {
     const router = useRouter();
     const { trainingPlan, isLoading } = usePlan();
+    const { session } = useAuth();
 
     const ballAnim = useRef(new Animated.Value(0)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -42,6 +44,13 @@ export default function LandingScreen() {
             Animated.timing(slideAnim, { toValue: 0, duration: 700, delay: 300, useNativeDriver: true }),
         ]).start();
     }, []);
+
+    // Guard: if not authenticated, go back to login
+    useEffect(() => {
+        if (!session) {
+            router.replace('/login');
+        }
+    }, [session]);
 
     // If plan already exists, go to dashboard
     useEffect(() => {

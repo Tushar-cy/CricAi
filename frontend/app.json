@@ -1,28 +1,35 @@
 {
-    "expo": {
-        "name": "CricAI",
-        "slug": "cricai",
-        "version": "1.0.0",
-        "orientation": "portrait",
-        "scheme": "cricai",
-        "userInterfaceStyle": "dark",
-        "ios": {
-            "supportsTablet": false,
-            "bundleIdentifier": "com.cricai.app"
-        },
-        "android": {
-            "package": "com.cricai.app"
-        },
-        "web": {
-            "bundler": "metro",
-            "output": "static"
-        },
-        "plugins": [
-            "expo-router",
-            "expo-font"
-        ],
-        "experiments": {
-            "typedRoutes": false
-        }
+  "expo": {
+    "name": "CricAI",
+    "slug": "cricai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "cricai",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.cricai.app"
+    },
+    "android": {
+      "package": "com.cricai.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f8ec794f-58b3-4e8d-bee4-cdb9fbc8187b"
+      }
     }
+  }
 }

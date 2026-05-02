@@ -64,11 +64,26 @@ export default function GeneratingScreen() {
         try {
             Animated.timing(progressAnim, { toValue: 0.3, duration: 2000, useNativeDriver: false }).start();
 
-            const response = await fetch(ENDPOINTS.generatePlan, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(userProfile),
-            });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 60000); // 60s for GPT
+
+            let response;
+            try {
+                response = await fetch(ENDPOINTS.generatePlan, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(userProfile),
+                    signal: controller.signal,
+                });
+            } catch (fetchErr) {
+                throw new Error(
+                    fetchErr.name === 'AbortError'
+                        ? 'Connection timed out (60s). Make sure your backend is running and IP in api.js is correct.'
+                        : `Network error: ${fetchErr.message}`
+                );
+            } finally {
+                clearTimeout(timeout);
+            }
 
             Animated.timing(progressAnim, { toValue: 0.8, duration: 1000, useNativeDriver: false }).start();
 
@@ -101,9 +116,9 @@ export default function GeneratingScreen() {
                     <Text style={styles.errorHint}>
                         Make sure:{'\n'}
                         • Backend is running (`node server.js`){'\n'}
-                        • OpenAI API key is set in `.env`{'\n'}
+                        • OPENAI_API_KEY is set in `backend/.env`{'\n'}
                         • Phone & PC on same WiFi{'\n'}
-                        • IP in `constants/api.js` is correct
+                        • IP in `constants/api.js` matches your PC
                     </Text>
                 </SafeAreaView>
             </LinearGradient>
@@ -139,7 +154,7 @@ export default function GeneratingScreen() {
                 </View>
 
                 <Text style={styles.hintText}>
-                    OpenAI is crafting {userProfile?.role}-specific drills for you...
+                    OLLAMA is crafting {userProfile?.role}-specific drills for you...
                 </Text>
 
                 {/* Phase preview */}

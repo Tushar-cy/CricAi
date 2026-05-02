@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-    View, Text, StyleSheet, TouchableOpacity, TextInput,
+    View, Text, StyleSheet, TouchableOpacity, TextInput, Modal,
     Animated, Dimensions, ScrollView, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -15,18 +15,28 @@ const STEPS = 5;
 
 export default function OnboardScreen() {
     const router = useRouter();
-    const { saveUserProfile } = usePlan();
+    const { saveUserProfile, trainingPlan } = usePlan();
     const [step, setStep] = useState(0);
     const progressAnim = useRef(new Animated.Value(0)).current;
 
+    // Guard: if plan already exists, don't allow re-generation via back button
+    useEffect(() => {
+        if (trainingPlan) {
+            router.replace('/(tabs)/dashboard');
+        }
+    }, []);
+
     const [form, setForm] = useState({
         name: '',
-        age: '',
+        ageMonths: '',
+        ageYears: '',
         role: '',
         level: '',
         availability: 5,
         fitness: '',
     });
+
+    const [agePopup, setAgePopup] = useState({ visible: false, type: null, msg: '', emoji: '' });
 
     const animateProgress = (toStep) => {
         Animated.timing(progressAnim, {
@@ -36,7 +46,36 @@ export default function OnboardScreen() {
         }).start();
     };
 
+    const dismissAgePopup = () => {
+        const wasLegend = agePopup.type === 'legend';
+        setAgePopup({ visible: false, type: null, msg: '', emoji: '' });
+        if (wasLegend) {
+            animateProgress(step + 1);
+            setStep(step + 1);
+        }
+    };
+
     const goNext = () => {
+        if (step === 1) {
+            const years = parseInt(form.ageYears) || 0;
+            const hasMonthsOnly = form.ageMonths && !form.ageYears;
+            if (hasMonthsOnly || years === 0) {
+                setAgePopup({ visible: true, type: 'suspicious', emoji: '🚨', msg: 'Age suspicious detected 🚨\nPlease enter human age.' });
+                return;
+            }
+            if (years > 100) {
+                setAgePopup({ visible: true, type: 'suspicious', emoji: '🚨', msg: 'Age suspicious detected 🚨\nPlease enter human age.' });
+                return;
+            }
+            if (years >= 1 && years <= 3) {
+                setAgePopup({ visible: true, type: 'mini', emoji: '👶', msg: 'Mini player detected!\nCome back after growth spurt!' });
+                return;
+            }
+            if (years >= 80 && years <= 100) {
+                setAgePopup({ visible: true, type: 'legend', emoji: '👑', msg: 'Legend Mode unlocked...\nRespect!' });
+                return; // will advance AFTER popup dismiss
+            }
+        }
         if (step < STEPS - 1) {
             animateProgress(step + 1);
             setStep(step + 1);
@@ -56,7 +95,7 @@ export default function OnboardScreen() {
 
     const canProceed = () => {
         if (step === 0) return form.name.trim().length > 0;
-        if (step === 1) return form.age && parseInt(form.age) > 5 && parseInt(form.age) < 60;
+        if (step === 1) return form.ageYears.trim().length > 0 || form.ageMonths.trim().length > 0;
         if (step === 2) return form.role !== '';
         if (step === 3) return form.level !== '';
         if (step === 4) return form.fitness !== '';
@@ -66,7 +105,8 @@ export default function OnboardScreen() {
     const handleSubmit = async () => {
         const profile = {
             name: form.name.trim(),
-            age: parseInt(form.age),
+            age: parseInt(form.ageYears) || 0,
+            ageMonths: parseInt(form.ageMonths) || 0,
             role: form.role,
             level: form.level,
             availability: form.availability,
@@ -131,6 +171,44 @@ export default function OnboardScreen() {
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
+
+            {/* Age fun popup modal */}
+            <Modal transparent visible={agePopup.visible} animationType="fade" statusBarTranslucent>
+                <View style={styles.modalOverlay}>
+                    <View style={[
+                        styles.modalCard,
+                        agePopup.type === 'suspicious' && { borderColor: '#FF4444' },
+                        agePopup.type === 'mini'       && { borderColor: '#F59E0B' },
+                        agePopup.type === 'legend'     && { borderColor: '#FFD700' },
+                    ]}>
+                        <Text style={styles.modalEmoji}>{agePopup.emoji}</Text>
+                        <Text style={[
+                            styles.modalMsg,
+                            agePopup.type === 'suspicious' && { color: '#FF6B6B' },
+                            agePopup.type === 'mini'       && { color: '#FBBF24' },
+                            agePopup.type === 'legend'     && { color: '#FFD700' },
+                        ]}>{agePopup.msg}</Text>
+                        <TouchableOpacity
+                            style={[
+                                styles.modalBtn,
+                                agePopup.type === 'suspicious' && { backgroundColor: '#FF444430', borderColor: '#FF4444' },
+                                agePopup.type === 'mini'       && { backgroundColor: '#F59E0B30', borderColor: '#F59E0B' },
+                                agePopup.type === 'legend'     && { backgroundColor: '#FFD70030', borderColor: '#FFD700' },
+                            ]}
+                            onPress={dismissAgePopup}
+                        >
+                            <Text style={[
+                                styles.modalBtnText,
+                                agePopup.type === 'suspicious' && { color: '#FF6B6B' },
+                                agePopup.type === 'mini'       && { color: '#FBBF24' },
+                                agePopup.type === 'legend'     && { color: '#FFD700' },
+                            ]}>
+                                {agePopup.type === 'legend' ? 'Let\'s Go! 🚀' : 'Got it!'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </LinearGradient>
     );
 }
@@ -160,13 +238,27 @@ function StepAge({ form, setForm }) {
         <View style={styles.step}>
             <Text style={styles.stepEmoji}>🎂</Text>
             <Text style={styles.stepTitle}>How old are you?</Text>
-            <Text style={styles.stepSub}>Your age helps calibrate intensity</Text>
+            <Text style={styles.stepSub}>Enter months &amp; years — we'll handle the math</Text>
+
+            {/* Months field (first) */}
+            <Text style={styles.ageLabel}>🗓️ Months <Text style={styles.ageLabelOpt}>(optional)</Text></Text>
+            <TextInput
+                style={[styles.input, { marginBottom: 16 }]}
+                placeholder="e.g. 6"
+                placeholderTextColor={COLORS.textMuted}
+                value={form.ageMonths}
+                onChangeText={v => setForm({ ...form, ageMonths: v.replace(/[^0-9]/g, '') })}
+                keyboardType="numeric"
+            />
+
+            {/* Years field (second) */}
+            <Text style={styles.ageLabel}>📅 Years</Text>
             <TextInput
                 style={styles.input}
-                placeholder="Enter your age (e.g. 19)"
+                placeholder="e.g. 22"
                 placeholderTextColor={COLORS.textMuted}
-                value={form.age}
-                onChangeText={v => setForm({ ...form, age: v.replace(/[^0-9]/g, '') })}
+                value={form.ageYears}
+                onChangeText={v => setForm({ ...form, ageYears: v.replace(/[^0-9]/g, '') })}
                 keyboardType="numeric"
                 autoFocus
             />
@@ -302,4 +394,29 @@ const styles = StyleSheet.create({
     nextGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 10 },
     nextText: { fontFamily: 'Outfit_700Bold', fontSize: 16, color: '#fff' },
     nextBtnDisabled: {},
+    ageLabel: {
+        fontFamily: 'Inter_600SemiBold', fontSize: 13,
+        color: COLORS.textSecondary, marginBottom: 8,
+    },
+    ageLabelOpt: { fontFamily: 'Inter_400Regular', fontSize: 12, color: COLORS.textMuted },
+    // Modal
+    modalOverlay: {
+        flex: 1, backgroundColor: '#000000CC',
+        alignItems: 'center', justifyContent: 'center', padding: 32,
+    },
+    modalCard: {
+        width: '100%', backgroundColor: '#0D1526',
+        borderRadius: 24, borderWidth: 1.5,
+        padding: 32, alignItems: 'center', gap: 12,
+    },
+    modalEmoji: { fontSize: 56, marginBottom: 4 },
+    modalMsg: {
+        fontFamily: 'Outfit_700Bold', fontSize: 20,
+        textAlign: 'center', lineHeight: 30,
+    },
+    modalBtn: {
+        marginTop: 12, borderWidth: 1.5, borderRadius: 14,
+        paddingVertical: 14, paddingHorizontal: 40,
+    },
+    modalBtnText: { fontFamily: 'Outfit_700Bold', fontSize: 15 },
 });

@@ -8,11 +8,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, PHASES } from '../../constants/theme';
 import { usePlan } from '../../context/PlanContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function SettingsScreen() {
     const router = useRouter();
     const { userProfile, trainingPlan, completedDays, streak, resetAll } = usePlan();
+    const { signOut } = useAuth();
     const [resetting, setResetting] = useState(false);
+
+    const handleSignOut = () => {
+        Alert.alert(
+            'Sign Out',
+            'Are you sure you want to sign out?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: async () => { await signOut(); router.replace('/login'); } },
+            ]
+        );
+    };
 
     const handleReset = () => {
         Alert.alert(
@@ -119,10 +132,22 @@ export default function SettingsScreen() {
                         </TouchableOpacity>
                     </View>
 
+                    {/* Sign Out */}
+                    <TouchableOpacity style={[styles.actionBtn, { borderColor: '#EF444420' }]} onPress={handleSignOut} activeOpacity={0.84}>
+                        <View style={[styles.actionIcon, { backgroundColor: '#EF444415' }]}>
+                            <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Sign Out</Text>
+                            <Text style={styles.actionSub}>You can sign back in at any time</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+
                     {/* About */}
                     <View style={styles.aboutCard}>
                         <Text style={styles.aboutTitle}>CricAI</Text>
-                        <Text style={styles.aboutSub}>v1.0.0 · Powered by Google Gemini AI</Text>
+                        <Text style={styles.aboutSub}>v1.0.0 · Powered by GPT-4o-mini</Text>
                         <Text style={styles.aboutDesc}>
                             Your AI-powered cricket coaching system. 100 structured days of personalized training, built for grassroots players who want to level up.
                         </Text>
